@@ -1,4 +1,4 @@
-// contracts/GLDToken.sol
+// contracts/EspToken.sol
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
@@ -23,9 +23,11 @@ contract EspToken is ERC20, Ownable {
 
 		accountList[0] = owner();
 		numberOfAccounts = 1;
-
-
 	}
+
+
+	// Override to include 1% Tansaction Tax split between burn and random distribution
+	// Transaction Tax is netted on the recipient
 
 	   function transfer(address recipient, uint256 amount) public override virtual returns (bool) {
 
@@ -57,6 +59,9 @@ contract EspToken is ERC20, Ownable {
 
         return true;
     }
+
+	// Override to include 1% Tansaction Tax split between burn and random distribution
+	// Transaction Tax is netted on the recipient
 
     function transferFrom(address sender, address recipient, uint256 amount) public virtual override returns (bool) {
         
@@ -94,7 +99,7 @@ contract EspToken is ERC20, Ownable {
     }
 
 
-
+// Non ERC-20 Function to allow admin transfers without incurring the transaction tax
 
     function adminTransfer(address recipient, uint256 amount) public virtual onlyOwner returns  (bool) {
     	
@@ -112,6 +117,8 @@ contract EspToken is ERC20, Ownable {
 
     }
 
+// Admin Burn function of owner held tokens.   Used as part of the buy back & burn policy.
+
     function adminBurn(uint256 _amount) public virtual onlyOwner returns (bool) {
 
     	_burn(owner(), _amount);
@@ -119,6 +126,8 @@ contract EspToken is ERC20, Ownable {
     	return true;
     }
 
+
+// Internal Non ERC-20 function to randomly distribute the collected fee (unburned portion) to a non-zero balance account.  
 
     function _distribute(uint256 _amount) internal virtual {
     	
@@ -133,6 +142,8 @@ contract EspToken is ERC20, Ownable {
     		_transfer(owner(), accountList[_select], _amount);
     	} 
     }
+
+// Admin function to return number of unzeroed accounts.  
 
     function numOfAccounts() public view virtual onlyOwner returns (uint256) {
     	return numberOfAccounts;
