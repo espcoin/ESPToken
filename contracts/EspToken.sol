@@ -1,18 +1,28 @@
 // contracts/EspToken.sol
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.0;
 
-import "../node_modules/@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "../node_modules/@openzeppelin/contracts/access/Ownable.sol";
-import "../node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
-import "../node_modules/@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
+
+/*
+EspToken is a ERC20 compatible token with a initial supply and final supply.   
+The token cannot be diluted with addtional minted supply after contract creation and can only be burned down to the final supply.
+1% Tax is charged on each transaction
+	Split 50/50 to a random account holder distribution and burn
+	Once total supply is equal to final supply, the full 1% is randomly distributed to an account holder
+Special Admin Functions (non-ERC20 additions)
+	adminBurn - Allows admin to burn owner held tokens, used to execute buy back and burn policy
+	adminTransfer - Admin can transfer tokens without incurring Tax & Burn
+
+*/
 
 contract EspToken is ERC20, Ownable {
 	
 	mapping (uint256 => address) private accountList;
 	uint256 private numberOfAccounts;
-	uint256 private finalSupply;
+	uint256 immutable private finalSupply;
 
 	constructor(uint256 _initialSupply, uint256 _finalSupply ) ERC20("E$P Token", "E$P"){
 		_mint(msg.sender, _initialSupply);
@@ -21,7 +31,7 @@ contract EspToken is ERC20, Ownable {
 
 		// Variables used to randomly select accounts to distrubute tax to
 
-		accountList[0] = owner();
+		accountList[0] = _msgSender();
 		numberOfAccounts = 1;
 	}
 
@@ -31,31 +41,7 @@ contract EspToken is ERC20, Ownable {
 
 	   function transfer(address recipient, uint256 amount) public override virtual returns (bool) {
 
-	   	//Tax Burn & Distribute
-
-	   	uint256 _burnAmount;
-
-	   	_burnAmount = amount / 200; 
-
-	   	if(balanceOf(recipient) == 0) {
-	   		accountList[numberOfAccounts] = recipient;
-	   		numberOfAccounts += 1;
-
-	   	}
-
-
-	   	if (totalSupply() >= finalSupply ) {
-	   		//transfer Tokents frist to owner, then immediately burn
-	   		_transfer(_msgSender(), owner(), _burnAmount * 2);
-	   		_burn(owner(), _burnAmount);
-	   		//send equal amount to be distributed.   
-	   		_distribute(_burnAmount);
-	   } else {
-
-	   		_distribute(_burnAmount * 2);
-	   }
-
-        _transfer(_msgSender(), recipient, (amount - _burnAmount * 2));
+	 	_taxAndSend(_msgSender(), recipient, amount);
 
         return true;
     }
@@ -65,7 +51,21 @@ contract EspToken is ERC20, Ownable {
 
     function transferFrom(address sender, address recipient, uint256 amount) public virtual override returns (bool) {
         
-	   	//Tax Burn & Distribute
+	   _taxAndSend(sender, recipient, amount);
+
+        uint256 currentAllowance = allowance(sender,_msgSender());
+        require(currentAllowance >= amount, "ERC20: transfer amount exceeds allowance");
+        _approve(sender, _msgSender(), currentAllowance - amount);
+
+        return true;
+    }
+
+
+    // internal function to process tax & transfer
+
+    function _taxAndSend(address sender, address recipient, uint256 amount) internal virtual {
+
+    	//Tax Burn & Distribute
 
 	   	uint256 _burnAmount;
 
@@ -77,27 +77,24 @@ contract EspToken is ERC20, Ownable {
 
 	   	}
 
+	   	//Transfer 1% Tax to owner before burn and distribute
+	   	_transfer(_msgSender(), owner(), _burnAmount * 2);
 
-	   	if (totalSupply() >= finalSupply ) {
-	   		//transfer Tokents frist to owner, then immediately burn
-	   		_transfer(sender, owner(), _burnAmount * 2);
+	   	if ((totalSupply() - _burnAmount) >= finalSupply ) {
+	   		//If total supply has not burned down to finalSupply, burn and disribute (50/50)
+
 	   		_burn(owner(), _burnAmount);
 	   		//send equal amount to be distributed.   
 	   		_distribute(_burnAmount);
 	   } else {
-
+	   		// If total supply has been burned down to finalSupply, just distribute with no burn.
 	   		_distribute(_burnAmount * 2);
 	   }
 
+	   //send amount less tax to recipient
         _transfer(sender, recipient, (amount - _burnAmount * 2));
 
-        uint256 currentAllowance = allowance(sender,_msgSender());
-        require(currentAllowance >= amount, "ERC20: transfer amount exceeds allowance");
-        _approve(sender, _msgSender(), currentAllowance - amount);
-
-        return true;
     }
-
 
 // Non ERC-20 Function to allow admin transfers without incurring the transaction tax
 
@@ -117,13 +114,18 @@ contract EspToken is ERC20, Ownable {
 
     }
 
-// Admin Burn function of owner held tokens.   Used as part of the buy back & burn policy.
+// Admin Burn function of owner held tokens.   Used as part of the buy back & burn policy.  Only can burn Admin held tokens
+// Can only burn down to final supply
 
     function adminBurn(uint256 _amount) public virtual onlyOwner returns (bool) {
 
-    	_burn(owner(), _amount);
+    	//Only if resultant supply is greater or equal to final supply
 
-    	return true;
+    	require ((totalSupply() - _amount) >= finalSupply);
+    	
+    		_burn(owner(), _amount);
+    		return true;
+   	
     }
 
 
@@ -132,20 +134,21 @@ contract EspToken is ERC20, Ownable {
     function _distribute(uint256 _amount) internal virtual {
     	
     	uint256 _select;
+    	address _addressToSend; 
 
-
-    	require(numberOfAccounts != 0);
+    	require(numberOfAccounts != 0, 'Accounts Cannot Be Zero (Admin is 1) -- Contract Not Initialized Properly');
 
     	_select = block.number % numberOfAccounts;	
+    	_addressToSend = accountList[_select];
 
-    	if (balanceOf(accountList[_select]) != 0) {
-    		_transfer(owner(), accountList[_select], _amount);
+    	if (balanceOf(_addressToSend) != 0) {
+    		_transfer(owner(), _addressToSend, _amount);
     	} 
     }
 
 // Admin function to return number of unzeroed accounts.  
 
-    function numOfAccounts() public view virtual onlyOwner returns (uint256) {
+    function numOfAccounts() public view virtual returns (uint256) {
     	return numberOfAccounts;
     }
 
