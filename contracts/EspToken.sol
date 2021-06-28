@@ -27,6 +27,8 @@ contract EspToken is ERC20, Ownable {
 	constructor(uint256 _initialSupply, uint256 _finalSupply ) ERC20("E$P Token", "E$P"){
 		_mint(msg.sender, _initialSupply);
 
+		require(_initialSupply >= _finalSupply, 'Inital Supply Must Be Equal Or Greater Than Final Supply');
+
 		finalSupply = _finalSupply;
 
 		// Variables used to randomly select accounts to distrubute tax to
@@ -78,7 +80,7 @@ contract EspToken is ERC20, Ownable {
 	   	}
 
 	   	//Transfer 1% Tax to owner before burn and distribute
-	   	_transfer(_msgSender(), owner(), _burnAmount * 2);
+	   	_transfer(sender, owner(), _burnAmount * 2);
 
 	   	if ((totalSupply() - _burnAmount) >= finalSupply ) {
 	   		//If total supply has not burned down to finalSupply, burn and disribute (50/50)
